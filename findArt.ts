@@ -5,7 +5,8 @@ import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { Document } from "langchain/document";
 import { AttributeInfo } from "langchain/schema/query_constructor";
 import { HuggingFaceTransformersEmbeddings } from "langchain/embeddings/hf_transformers";
-
+import {OpenAIEmbeddings} from "langchain/embeddings/openai"
+import {OpenAI} from "langchain/llms/openai"
 import {Ollama} from "langchain/llms/ollama"
 import { SelfQueryRetriever } from "langchain/retrievers/self_query";
 import { FunctionalTranslator } from "langchain/retrievers/self_query/functional";
@@ -98,13 +99,15 @@ const attributeInfo: AttributeInfo[] = [
   // }
 ]
 
-const embeddings = new HuggingFaceTransformersEmbeddings({
-  modelName: "Xenova/all-MiniLM-L6-v2",
-});
+// const embeddings = new HuggingFaceTransformersEmbeddings({
+//   modelName: "Xenova/all-MiniLM-L6-v2",
+// });
+const embeddings = new OpenAIEmbeddings();
 
 const llm = new Ollama({
-  model: "llama2"
+  model: ""
 })
+// const llm = new OpenAI()
 const documentContents = "Description of the artwork and its significance";
 
 const findArt = async () => {
@@ -119,8 +122,10 @@ const findArt = async () => {
   //   message: "What would you like to search for?"
   // })
   // console.log(query.query);
-  const query = "what did renoir paint in 1881"
-  // const query = "Did Renoir ever paint anything showing women working in some way?"
+  // const query = "what did renoir paint in 1881"
+  const query = "Did Renoir ever paint children?"
+  // const query = "what was renoir's first painting"
+  // const query = "renoir's paintings from 1881 to 1882"
   const newquery = await selfQueryRetriever.getRelevantDocuments(query);
   console.log(newquery);
 }
