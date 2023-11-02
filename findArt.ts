@@ -105,7 +105,7 @@ const attributeInfo: AttributeInfo[] = [
 const embeddings = new OpenAIEmbeddings();
 
 const llm = new Ollama({
-  model: ""
+  model: "llama2"
 })
 // const llm = new OpenAI()
 const documentContents = "Description of the artwork and its significance";
