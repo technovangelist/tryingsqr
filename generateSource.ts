@@ -1,22 +1,57 @@
-import { Artwork } from './types';
-import { Ollama } from 'ollama-node';
-import * as fs from 'node:fs';
+import { Artwork, RawArtwork } from './types';
+import { HuggingFaceTransformersEmbeddings } from 'langchain/embeddings/hf_transformers';
+import { Chroma } from "langchain/vectorstores/chroma";
+import { Document } from "langchain/document";
+import { ChromaClient } from "chromadb";
+const numberOfArtworks = 15;
 
-const numberOfArtworks = 10;
-// const artURL = `https://api.artic.edu/api/v1/artworks?limit=${numberOfArtworks}`
+const artists = ["van Gogh", "Renoir", "Monet", "Picasso"]
 
-const fetchArtistWorks = async (artist: string): Promise<number[]> => {
+const addShortName = (artist: string): string => {
+  // let n = [artist];
+  for (const name of artists) {
+    if (artist.includes(name)) {
+      artist = name;
+    }
+  }
+  return artist;
+}
+
+const getArt = async (artists: string[]) => {
+  const artworks: Artwork[] = [];
+  const artistsWorkIds: number[] = []
+
+  for (const artist of artists) {
+    const thisIds = await fetchArtistWorkIds(artist);
+    console.log(`Fetching ${artist}`);
+    await (new Promise(r => setTimeout(r, 1000)));
+    artistsWorkIds.push(...thisIds);
+  };
+  const artwork = await fetchArtwork(artistsWorkIds);
+  return artwork
+}
+
+const fetchArtistWorkIds = async (artist: string): Promise<number[]> => {
   const artistURL = `https://api.artic.edu/api/v1/artworks/search?q=${artist}&limit=${numberOfArtworks}`;
   const response = await fetch(artistURL);
   const json = await response.json();
   const artistWorks: { id: number }[] = json.data;
-  return artistWorks.map((work) => work.id);
+  const justIds = artistWorks.map((work) => work.id);
+  return justIds;
 }
+const embedding = new HuggingFaceTransformersEmbeddings({
+  modelName: "Xenova/all-MiniLM-L6-v2",
+});
 
 const sanitize = (badstring: string): string => {
+  let goodstring = " ";
   if (badstring !== null) {
-    badstring = badstring.replace(/[\u2018\u2019]/gm, "\'")
-      .replace(/[\u201C\u201D]/gm, '\"')
+    goodstring = badstring
+      .replace(/<\s*a\s+[^>]*href\s*=\s*[\"']?([^\"' >]+)[\"' >]>/gm, "")
+      .replace(/<\/a>/gm, "")
+      .replace(/<\/?em>/gm, "")
+      .replace(/[\u2018\u2019]/gm, "")
+      .replace(/[\u201C\u201D]/gm, "")
       .replace(/[\u2013\u2014]/gm, "-")
       .replace(/[\u2026]/gm, "...")
       .replace(/[\u00A0]/gm, " ")
@@ -51,125 +86,51 @@ const sanitize = (badstring: string): string => {
       .replace(/[\u0101\u0103\u00E0]/gm, "a")
       .replace(/[\u00C9]/gm, "E")
       .replace(/<p>/gm, "")
-      .replace(/<\/p>/gm, "\n");
-  } else {badstring = " "};
-  return badstring
+      .replace(/<\/p>/gm, "")
+      .replace(/\n/gm, "");
+  };
+  return goodstring;
 }
 
-const fetchArtwork = async (workids: number[]): Promise<Artwork[]> => {
+
+const fetchArtwork = async (workids: number[]) => {
+  const docsarray = [];
   const artworks: Artwork[] = [];
-  const ollama = new Ollama();
+
   for await (const workid of workids) {
     const artworkURL = `https://api.artic.edu/api/v1/artworks/${workid}`;
     const response = await fetch(artworkURL);
     const json = await response.json();
-    const artworkraw: Artwork = json.data as Artwork;
-    // const embbedding = await ollama.generateEmbed("llama2", sanitize(artworkraw.description));
-    const artwork: Artwork = {
-      id: artworkraw.id,
-      title: sanitize(artworkraw.title),
-      artist_display: sanitize(artworkraw.artist_display),
-      place_of_origin: artworkraw.place_of_origin,
-      date_start: artworkraw.date_start,
-      date_end: artworkraw.date_end,
-      duration: artworkraw.date_end - artworkraw.date_start,
-      dimensions: sanitize(artworkraw.dimensions),
-      medium_display: artworkraw.medium_display,
-      credit_line: artworkraw.credit_line,
-      artwork_type_title: artworkraw.artwork_type_title,
-      department_title: artworkraw.department_title,
-      artist_title: artworkraw.artist_title,
-      classification_title: artworkraw.classification_title,
-      description: sanitize(artworkraw.description),
-      // description_embedding: embbedding,
+    const artworkraw: RawArtwork = await json.data as RawArtwork;
+    const description = sanitize(artworkraw.description)
+    if (description !== " ") {
+      const doc = new Document({
+        pageContent: description,
+        metadata: {
+          title: sanitize(artworkraw.title),
+          date: artworkraw.date_end,
+          artist: addShortName(artworkraw.artist_title),
+        }
+      });
+      docsarray.push(doc);
+      console.log("------------------")
+      console.log(`${artworkraw.title} - ${artworkraw.artist_title}`);
     }
-
-    console.log("------------------")
-    let duration = "less than a year";
-    if (artwork.duration == 1) {
-      duration = "1 year";
-    } else if (artwork.duration > 1) {
-      duration = `${artwork.duration} years`;
-    }
-    console.log(`${artwork.title} - ${artwork.artist_title} - ${duration}`);
-    artworks.push(artwork);
   }
 
-  return artworks;
+  return docsarray;
 }
 
-const getArt = async (artists: string[]): Promise<Artwork[]> => {
-  const artworks: Artwork[] = [];
-  for await (const artist of artists) {
-    const artistWorks = await fetchArtistWorks(artist);
-    const artwork = await fetchArtwork(artistWorks);
-    artworks.push(...artwork);
-  }
-  return artworks;
-}
 
 
 const generateSource = async () => {
-  const artists = ["monet", "picasso", "vangogh", "renoir"];
-  const artworks = await getArt(artists);
-  fs.writeFileSync("artworks.json", JSON.stringify(artworks, null, 2))
-  // for await (const artwork of art) {
-  //   let embedding: number[] = [];
-  //   const ollama = new Ollama();
-  //   await ollama.setModel("llama2");
-  //   console.log(artwork)
-  //   if (artwork.description !== null) {
-  //     embedding = await ollama.generateEmbed("llama2", artwork.description);
-  //     console.log(`Embedding for ${artwork.title} completed`)
-  //     console.log(artwork.description)
-  //   } else {
-  //     console.log(`Embedding for ${artwork.title} skipped`)
-  //   }
-  //   const artworkjson =  {
-  //     id: artwork.id,
-  //     title: artwork.title,
-  //     artist_display: artwork.artist_display,
-  //     place_of_origin: artwork.place_of_origin,
-  //     dimensions: artwork.dimensions,
-  //     medium_display: artwork.medium_display,
-  //     credit_line: artwork.credit_line,
-  //     artwork_type_title: artwork.artwork_type_title,
-  //     department_title: artwork.department_title,
-  //     artist_title: artwork.artist_title,
-  //     classification_title: artwork.classification_title,
-  //     description: artwork.description,
-  //     description_embedding: embedding,
-  //   }
+  await new ChromaClient().deleteCollection({
+    name: "artcollection",
+  });
+  const allartworkdocs = await getArt(artists);
 
-  //   // console.log(artworkjson)
-  //   docs.push(artworkjson);
-  // }
-  // // art.map(async (artwork) => {
-  // //   let embedding: number[] = [];
-  // //   const ollama = new Ollama();
-  // //   await ollama.setModel("llama2");
-  // //   if (artwork.description !== null) {
-  // //     embedding = await ollama.generateEmbed("llama2", artwork.description);
-  // //   }
-  // //   const artworkjson =  {
-  // //     id: artwork.id,
-  // //     title: artwork.title,
-  // //     artist_display: artwork.artist_display,
-  // //     place_of_origin: artwork.place_of_origin,
-  // //     dimensions: artwork.dimensions,
-  // //     medium_display: artwork.medium_display,
-  // //     credit_line: artwork.credit_line,
-  // //     artwork_type_title: artwork.artwork_type_title,
-  // //     department_title: artwork.department_title,
-  // //     artist_title: artwork.artist_title,
-  // //     classification_title: artwork.classification_title,
-  // //     description: artwork.description,
-  // //     description_embedding: embedding,
-  // //   }
-  // //   console.log(artworkjson)
-  // //   docs.push(artworkjson);
-  // // })
-  // // console.log(JSON.stringify(docs, null, 2));
+  const vectorStore = await Chroma.fromDocuments(allartworkdocs, embedding, { collectionName: "artcollection" });
+  console.log(`Created vector store with ${await vectorStore.collection?.count()} documents`);
 }
 
 generateSource();

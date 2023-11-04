@@ -1,133 +1,66 @@
-import * as fs from "fs";
-import { Artwork } from "./types";
-// import prompts from "prompts";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
-import { Document } from "langchain/document";
+import { Chroma } from "langchain/vectorstores/chroma";
+import { ChromaTranslator } from "langchain/retrievers/self_query/chroma";
+import { Ollama } from "langchain/llms/ollama"
 import { AttributeInfo } from "langchain/schema/query_constructor";
 import { HuggingFaceTransformersEmbeddings } from "langchain/embeddings/hf_transformers";
-import {OpenAIEmbeddings} from "langchain/embeddings/openai"
-import {OpenAI} from "langchain/llms/openai"
-import {Ollama} from "langchain/llms/ollama"
 import { SelfQueryRetriever } from "langchain/retrievers/self_query";
-import { FunctionalTranslator } from "langchain/retrievers/self_query/functional";
 
-const loadFile = (): Document[] => {
-  const data = fs.readFileSync("artworks.json");
-  const artworks: Artwork[] = JSON.parse(data.toString());
-  return artworks.map((artwork) => {
-    const doc = new Document({
-      pageContent: artwork.description,
-      metadata: {
-        // id: artwork.id,
-        title: artwork.title,
-        // date_start: artwork.date_start,
-        // date_end: artwork.date_end,
-        date: artwork.date_end, 
-        // duration: artwork.duration,
-        // place_of_origin: artwork.place_of_origin,
-        // medium_display: artwork.medium_display,
-        // artwork_type_title: artwork.artwork_type_title,
-        // department_title: artwork.department_title,
-        // artist_title: artwork.artist_title,
-        artist: artwork.artist_title,
-        // classification_title: artwork.classification_title,
-      }
-    })
-    return doc;
-  })
-}
+const modelName = "codellama";
 
 const attributeInfo: AttributeInfo[] = [
-  // {
-  //   name: "id",
-  //   type: "number",
-  //   description: "The id of the artwork"
-  // }, 
   {
     name: "title",
     type: "string",
-    description: "The title of the artwork"
-  }, 
-  // {
-  //   name: "place_of_origin",
-  //   type: "string",
-  //   description: "The place of origin of the artwork"
-  // }, 
-  // {
-  //   name: "date_start",
-  //   type: "number",
-  //   description: "The year the artwork was started"
-  // },
-  // {
-  //   name: "date_end",
-  //   type: "number",
-  //   description: "The year the artwork was finished"
-  // },
+    description: "The title of the painting"
+  },
   {
     name: "date",
-    type: "number",
-    description: "The year the artwork was created"
+    type: "integer",
+    description: "The four digit year when the painting was created"
   },
-  // {
-  //   name: "duration",
-  //   type: "number",
-  //   description: "How long the artwork took to make", 
-    
-  // },
-  //  {
-  //   name: "medium_display",
-  //   type: "string",
-  //   description: "The medium display of the artwork"
-  // }, {
-  //   name: "artwork_type_title",
-  //   type: "string",
-  //   description: "The type of artwork, such as painting or sculpture"
-  // }, {
-  //   name: "department_title",
-  //   type: "string",
-  //   description: "The department of the museum that holds the artwork"
-  // }, 
   {
     name: "artist",
-    type: "string",
-    description: "The artist of the artwork"
-  },
-  // {
-  //   name: "classification_title",
-  //   type: "string",
-  //   description: "The classification of the artwork"
-  // }
+    type: "strings",
+    description: "The last name of the artist who created the painting."
+  }
 ]
 
-// const embeddings = new HuggingFaceTransformersEmbeddings({
-//   modelName: "Xenova/all-MiniLM-L6-v2",
-// });
-const embeddings = new OpenAIEmbeddings();
+const embeddings = new HuggingFaceTransformersEmbeddings({
+  modelName: "Xenova/all-MiniLM-L6-v2",
+});
 
 const llm = new Ollama({
-  model: "llama2"
+  model: modelName
 })
-// const llm = new OpenAI()
-const documentContents = "Description of the artwork and its significance";
+
+const documentContents = "Description of the art";
 
 const findArt = async () => {
-  const artworks = loadFile();
-  const vectorStore = await MemoryVectorStore.fromDocuments(loadFile(), embeddings);
-  const selfQueryRetriever = SelfQueryRetriever.fromLLM({
-    llm, vectorStore, documentContents, attributeInfo, structuredQueryTranslator: new FunctionalTranslator()
+  const vectorStore = await Chroma.fromExistingCollection(embeddings, {
+    collectionName: "artcollection",
   });
-  // const query = await prompts({
-  //   type: "text",
-  //   name: "query",
-  //   message: "What would you like to search for?"
-  // })
-  // console.log(query.query);
-  // const query = "what did renoir paint in 1881"
-  const query = "Did Renoir ever paint children?"
-  // const query = "what was renoir's first painting"
-  // const query = "renoir's paintings from 1881 to 1882"
-  const newquery = await selfQueryRetriever.getRelevantDocuments(query);
-  console.log(newquery);
+  // const vectorStore = await HNSWLib.load("artcollection", embeddings);
+
+  const retriever = SelfQueryRetriever.fromLLM({
+    llm, vectorStore, documentContents, attributeInfo, verbose: false, useOriginalQuery: true, structuredQueryTranslator: new ChromaTranslator()
+  });
+
+  const query = process.argv[2];
+
+  try {
+    const newquery = await retriever.getRelevantDocuments(query, [
+      {
+        handleLLMEnd(output) {
+          console.log("llm end")
+          const outout = output.generations[0][0].text.replace(/\\"/gm, "'").replace(/\n/gm, "")
+          console.log(`output - ${JSON.stringify(outout, null, 2)}`)
+        }
+      },
+    ]);
+    console.log(newquery);
+  } catch (error) {
+    console.log(`There was an error getting the values: ${error}`);
+  }
 }
 
 findArt();

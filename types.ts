@@ -1,4 +1,4 @@
-export type Artwork = {
+export type RawArtwork = {
   id: number;
   title: string;
   artist_display: string;
@@ -13,6 +13,15 @@ export type Artwork = {
   department_title: string;
   artist_title: string;
   classification_title: string;
+  description: string;
+}
+
+export type Artwork = {
+  id: number;
+  title: string;
+  country: string;
+  date: number;
+  artist: string;
   description: string;
   // description_embedding: number[];
 }
